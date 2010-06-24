@@ -28,6 +28,8 @@
 * Amazon S3 is a trademark of Amazon.com, Inc. or its affiliates.
 */
 
+class S3Exception extends Exception {}
+
 /**
 * Amazon S3 PHP class
 *
@@ -255,13 +257,11 @@ class S3 {
 	*
 	* @param string $file Input file
 	* @param mixed $md5sum Use MD5 hash (supply a string if you want to use your own)
-	* @return array | false
+	* @return array
 	*/
 	public static function inputFile($file, $md5sum = true) {
-		if (!file_exists($file) || !is_file($file) || !is_readable($file)) {
-			trigger_error('S3::inputFile(): Unable to open input file: '.$file, E_USER_WARNING);
-			return false;
-		}
+		if (!is_file($file) || !is_readable($file))
+			throw new S3Exception("Unable to open input file: $file");
 		return array('file' => $file, 'size' => filesize($file),
 		'md5sum' => $md5sum !== false ? (is_string($md5sum) ? $md5sum :
 		base64_encode(md5_file($file, true))) : '');
@@ -277,10 +277,8 @@ class S3 {
 	* @return array | false
 	*/
 	public static function inputResource(&$resource, $bufferSize, $md5sum = '') {
-		if (!is_resource($resource) || $bufferSize < 0) {
-			trigger_error('S3::inputResource(): Invalid resource or buffer size', E_USER_WARNING);
-			return false;
-		}
+		if (!is_resource($resource) || $bufferSize < 0)
+			throw new S3Exception('S3::inputResource(): Invalid resource or buffer size');
 		$input = array('size' => $bufferSize, 'md5sum' => $md5sum);
 		$input['fp'] =& $resource;
 		return $input;
@@ -299,7 +297,6 @@ class S3 {
 	* @return boolean
 	*/
 	public static function putObject($input, $bucket, $uri, $acl = self::ACL_PRIVATE, $metaHeaders = array(), $requestHeaders = array()) {
-		if ($input === false) return false;
 		$rest = new S3Request('PUT', $bucket, $uri);
 
 		if (is_string($input)) $input = array(
@@ -342,22 +339,22 @@ class S3 {
 		}
 
 		// We need to post with Content-Length and Content-Type, MD5 is optional
-		if ($rest->size >= 0 && ($rest->fp !== false || $rest->data !== false)) {
-			$rest->setHeader('Content-Type', $input['type']);
-			if (isset($input['md5sum'])) $rest->setHeader('Content-MD5', $input['md5sum']);
+		if ($rest->size < 0 || ($rest->fp === false && $rest->data === false))
+			throw new S3Exception('Missing input parameters');
 
-			$rest->setAmzHeader('x-amz-acl', $acl);
-			foreach ($metaHeaders as $h => $v) $rest->setAmzHeader('x-amz-meta-'.$h, $v);
-			$rest->getResponse();
-		} else
-			$rest->response->error = array('code' => 0, 'message' => 'Missing input parameters');
+		$rest->setHeader('Content-Type', $input['type']);
+		if (isset($input['md5sum'])) $rest->setHeader('Content-MD5', $input['md5sum']);
+
+		$rest->setAmzHeader('x-amz-acl', $acl);
+		foreach ($metaHeaders as $h => $v) $rest->setAmzHeader('x-amz-meta-'.$h, $v);
+		$rest->getResponse();
 
 		if ($rest->response->error === false && $rest->response->code !== 200)
-			$rest->response->error = array('code' => $rest->response->code, 'message' => 'Unexpected HTTP status');
-		if ($rest->response->error !== false) {
-			trigger_error(sprintf("S3::putObject(): [%s] %s", $rest->response->error['code'], $rest->response->error['message']), E_USER_WARNING);
-			return false;
-		}
+			throw new S3Exception('Unexpected HTTP status', $rest->response->code);
+
+		if ($rest->response->error !== false)
+			throw new S3Exception($rest->response->error['message'], $rest->response->error['code']);
+
 		return true;
 	}
 
@@ -435,16 +432,19 @@ class S3 {
 	* @return mixed | false
 	*/
 	public static function getObjectInfo($bucket, $uri, $returnInfo = true) {
-		$rest = new S3Request('HEAD', $bucket, $uri);
-		$rest = $rest->getResponse();
-		if ($rest->error === false && ($rest->code !== 200 && $rest->code !== 404))
-			$rest->error = array('code' => $rest->code, 'message' => 'Unexpected HTTP status');
-		if ($rest->error !== false) {
-			trigger_error(sprintf("S3::getObjectInfo({$bucket}, {$uri}): [%s] %s",
-			$rest->error['code'], $rest->error['message']), E_USER_WARNING);
-			return false;
-		}
-		return $rest->code == 200 ? $returnInfo ? $rest->headers : true : false;
+		$request = new S3Request('HEAD', $bucket, $uri);
+		$response = $request->getResponse();
+
+		if ($response->error !== false)
+			throw new S3Exception($response->error['message'], $response->error['code']);
+
+		if ($response->code !== 200 && $response->code !== 404)
+			throw new S3Exception('Unexpected HTTP status', $response->code);
+
+		if ($response->code == 200)
+			return $returnInfo ? $response->headers : true;
+
+		return false;
 	}
 
 
