@@ -3,6 +3,8 @@
 * $Id: S3.php 47 2009-07-20 01:25:40Z don.schonknecht $
 *
 * Copyright (c) 2008, Donovan Schönknecht.  All rights reserved.
+* Copyright (c) 2010, Nick Welch
+* Copyright (c) 2010, Parthenon Software
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
